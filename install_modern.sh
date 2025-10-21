@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
 
 # ====== CONFIG DASAR ======
@@ -27,11 +26,11 @@ IPV4=$(curl -sS ipv4.icanhazip.com || true)
 [[ -n "${IPV4:-}" ]] || { err "IP publik tidak terdeteksi"; exit 1; }
 ok "IP VPS: $IPV4"
 
-# ====== CEK LISENSI (tetap seperti script lama) ======
+# ====== CEK LISENSI (sesuai format ### user tanggal IP) ======
 echo -e "${YELLOW}Cek lisensi...${NC}"
 L_RAW="$(curl -fsSL "$REGIST_URL" || true)"
-USER_L=$(echo "$L_RAW" | awk -v ip="$IPV4" '$1==ip {print $2}')
-EXP_L=$(echo "$L_RAW" | awk -v ip="$IPV4" '$1==ip {print $4}')
+USER_L=$(echo "$L_RAW" | awk -v ip="$IPV4" '$4==ip {print $2}')
+EXP_L=$(echo "$L_RAW" | awk -v ip="$IPV4" '$4==ip {print $3}')
 if [[ -z "${USER_L:-}" || -z "${EXP_L:-}" ]]; then
   err "IP $IPV4 tidak terdaftar / format Regist tidak sesuai"; exit 1
 fi
@@ -55,7 +54,6 @@ apt-get install -y --no-install-recommends \
   vnstat fail2ban dropbear \
   nginx haproxy
 
-# beberapa distri butuh ini agar iptables-persistent ada servicenya
 systemctl enable --now netfilter-persistent || true
 systemctl enable --now fail2ban || true
 ok "Paket dasar terpasang"
@@ -77,7 +75,6 @@ rm -rf /root/.acme.sh
 mkdir -p /root/.acme.sh
 curl -fsSL https://get.acme.sh | sh -s email=admin@"$DOMAIN"
 ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-# pastikan port 80 bebas
 systemctl stop nginx || true
 systemctl stop haproxy || true
 ~/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone -k ec-256
@@ -89,14 +86,12 @@ ok "SSL terpasang"
 
 # ====== XRAY CORE (stable) ======
 bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data
-# config server ambil dari repo lo (tetap)
 curl -fsSL "${REPO}config/config.json" -o /etc/xray/config.json
-# ganti placeholder "xxx" dengan UUID/DOMAIN kalau perlu
 UUID=$(cat /proc/sys/kernel/random/uuid)
 sed -i "s/\"xxx\"/\"$UUID\"/g" /etc/xray/config.json
 ok "Xray terpasang (UUID: $UUID)"
 
-# ====== NGINX & HAPROXY (reverse proxy TLS→WS/GRPC) ======
+# ====== NGINX & HAPROXY ======
 curl -fsSL "${REPO}config/nginx.conf" -o /etc/nginx/nginx.conf
 curl -fsSL "${REPO}config/xray.conf"   -o /etc/nginx/conf.d/xray.conf
 sed -i "s/xxx/$DOMAIN/g" /etc/nginx/conf.d/xray.conf
@@ -112,20 +107,16 @@ systemctl enable --now haproxy
 ok "Nginx & Haproxy aktif"
 
 # ====== SSH / DROPBEAR / SLOWDNS / UDP ======
-# SSH hardening minimal + banner
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
 sed -i 's/^AcceptEnv/#AcceptEnv/' /etc/ssh/sshd_config
 systemctl restart ssh
 
-# Dropbear
 curl -fsSL "${REPO}config/dropbear.conf" -o /etc/default/dropbear
 systemctl enable --now dropbear
 
-# SlowDNS (gunakan installer lo)
 curl -fsSL "${REPO}files/nameserver" -o /tmp/nameserver && chmod +x /tmp/nameserver
 bash /tmp/nameserver || true
 
-# UDP mini + limit
 curl -fsSL "${REPO}files/udp-mini" -o /usr/local/kyt/udp-mini
 chmod +x /usr/local/kyt/udp-mini
 for i in 1 2 3; do
@@ -133,16 +124,14 @@ for i in 1 2 3; do
   systemctl enable --now "udp-mini-${i}.service" || true
 done
 
-# ====== OpenVPN (systemd style modern) ======
-# gunakan installer lo agar config sesuai:
+# ====== OpenVPN ======
 curl -fsSL "${REPO}files/openvpn" -o /root/openvpn && chmod +x /root/openvpn
 bash /root/openvpn
-# aktifkan instance (jika ada nama service)
 systemctl enable --now openvpn || true
 systemctl enable --now openvpn-server@server-tcp || true
 systemctl enable --now openvpn-server@server-udp || true
 
-# ====== vnStat (paket distro, tanpa build manual) ======
+# ====== vnStat ======
 apt-get install -y vnstat
 systemctl enable --now vnstat || true
 
@@ -154,11 +143,10 @@ mkdir -p /usr/local/share/xray
 curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" -o /usr/local/share/xray/geosite.dat
 curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"   -o /usr/local/share/xray/geoip.dat
 
-# ====== Menu & cron (tetap pakai milik lo) ======
+# ====== Menu ======
 curl -fsSL "${REPO}menu/menu.zip" -o /root/menu.zip
 unzip -o /root/menu.zip -d /usr/local/sbin && chmod +x /usr/local/sbin/*
 rm -f /root/menu.zip
-# default menu on login
 cat >/root/.profile <<'EOF'
 if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
 mesg n || true
@@ -178,6 +166,8 @@ systemctl restart cron
 ok "Semua komponen terpasang."
 echo -e "${BLUE}Domain   :${NC} $DOMAIN"
 echo -e "${BLUE}UUID     :${NC} $UUID"
+echo -e "${BLUE}User     :${NC} $USER_L"
+echo -e "${BLUE}Expired  :${NC} $EXP_L"
 echo -e "${BLUE}Cert     :${NC} /etc/xray/xray.crt"
 echo -e "${BLUE}Key      :${NC} /etc/xray/xray.key"
 echo -e "${GREEN}Selesai. Reboot direkomendasikan.${NC}"
