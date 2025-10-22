@@ -435,31 +435,23 @@ ok "Service auto reload cert aktif setiap reboot 🔁"
 # ====== MENU, CRON, PAM PASSWORD ==== #
 ########################################
 ok "Pasang menu & PAM password rules…"
-# PAM password (kalau ada)
 curl -fsSL "$PASSWORD_PAM_URL" -o /etc/pam.d/common-password || true
 chmod 644 /etc/pam.d/common-password || true
 
-# Menu zip (kalau ada). Kalau nggak ada, bikin menu dummy.
-if curl -fsSL "$MENU_ZIP_URL" -o /root/menu.zip; then
-  unzip -o /root/menu.zip -d /usr/local/sbin >/dev/null 2>&1 || warn "menu.zip gagal diekstrak"
-  chmod +x /usr/local/sbin/* || true
-  rm -f /root/menu.zip
+# Hapus sisa folder menu yang salah
+rm -rf /usr/local/sbin/menu /root/menu.zip /root/menu-temp
+apt install -y lolcat >/dev/null 2>&1 || true
+wget -qO /root/menu.zip "$MENU_ZIP_URL"
+unzip -o /root/menu.zip -d /root/menu-temp >/dev/null 2>&1
+if [ -d /root/menu-temp/menu ]; then
+    mv /root/menu-temp/menu/* /usr/local/sbin/
 else
-  warn "menu.zip tidak ada — buat menu dummy."
-  cat >/usr/local/sbin/menu <<'SH'
-#!/usr/bin/env bash
-echo "────────── MENU (Dummy) ──────────"
-echo "1) Cek status: systemctl status xray nginx haproxy"
-echo "2) Log Xray  : tail -f /var/log/xray/access.log"
-echo "3) Restart   : systemctl restart xray nginx haproxy"
-echo "4) UUID      : grep -oE '\"id\": \"[^\"]+\"' /etc/xray/config.json | head -1"
-echo "──────────────────────────────────"
-SH
-  chmod +x /usr/local/sbin/menu
+    mv /root/menu-temp/* /usr/local/sbin/
 fi
-
-# Tampilkan menu tiap login root
-cat >/root/.profile <<'EOF'
+rm -rf /root/menu.zip /root/menu-temp
+chmod +x /usr/local/sbin/*
+grep -q "/usr/local/sbin" /root/.bashrc || echo 'export PATH=$PATH:/usr/local/sbin' >> /root/.bashrc
+cat > /root/.profile <<'EOF'
 if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
 mesg n || true
 menu
@@ -470,6 +462,7 @@ chmod 644 /root/.profile
 echo '*/20 * * * * root /usr/local/sbin/clearlog 2>/dev/null || true' >/etc/cron.d/clearlogs
 echo '2 0 * * * root /usr/local/sbin/xp 2>/dev/null || true'      >/etc/cron.d/xp_all
 systemctl restart cron || true
+
 
 ########################################
 # ====== NOTIF TELEGRAM (ops) ======== #
