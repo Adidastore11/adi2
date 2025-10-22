@@ -388,6 +388,50 @@ else
 fi
 
 ########################################
+# ====== FIX WS-ePRO & CERT RELOAD === #
+########################################
+ok "Terapkan perbaikan WS-ePRO & sertifikat SSL…"
+
+# Pastikan service ws aktif
+if systemctl list-units --type=service | grep -q "ws.service"; then
+  systemctl daemon-reexec >/dev/null 2>&1
+  systemctl daemon-reload >/dev/null 2>&1
+  systemctl restart ws >/dev/null 2>&1
+  systemctl enable ws >/dev/null 2>&1
+  ok "WS-ePRO aktif ✅"
+else
+  warn "Service ws tidak terdeteksi — skip auto-start."
+fi
+
+# Auto-fix haproxy cert reload (buat Ubuntu 24–25)
+if [[ -f /etc/xray/xray.crt && -f /etc/xray/xray.key ]]; then
+  cat /etc/xray/xray.key /etc/xray/xray.crt > /etc/haproxy/hap.pem
+  chmod 600 /etc/haproxy/hap.pem
+  systemctl restart haproxy >/dev/null 2>&1
+  ok "HAProxy sertifikat diperbarui & reload otomatis ✅"
+else
+  warn "Sertifikat belum ada — haproxy reload dilewati."
+fi
+
+# Tambahkan cron untuk auto-refresh cert setiap reboot
+cat >/etc/systemd/system/reload-cert.service <<'EOF'
+[Unit]
+Description=Auto Reload Haproxy Cert on Boot
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'cat /etc/xray/xray.key /etc/xray/xray.crt > /etc/haproxy/hap.pem && systemctl restart haproxy'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable reload-cert.service >/dev/null 2>&1
+ok "Service auto reload cert aktif setiap reboot 🔁"
+
+########################################
 # ====== MENU, CRON, PAM PASSWORD ==== #
 ########################################
 ok "Pasang menu & PAM password rules…"
