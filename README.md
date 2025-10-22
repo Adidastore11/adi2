@@ -9,8 +9,6 @@ apt update -y && apt upgrade -y
 wget -qO install_modern.sh https://raw.githubusercontent.com/Adidastore11/adi2/main/install_modern.sh
 chmod +x install_modern.sh
 ./install_modern.sh
-
-
 ```
 
 ## UPDATE SCRIPT
